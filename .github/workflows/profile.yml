@@ -1,0 +1,52 @@
+name: Redraw profile stats
+
+on:
+  schedule:
+    - cron: "17 15 * * *" # 00:17 JST
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["scripts/**", ".github/workflows/profile.yml"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: profile-stats
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # METRICS_TOKEN: classic PAT with `repo` and `read:user`, so private
+      # repositories are counted. Falls back to public data without it.
+      - name: Draw images
+        env:
+          GH_TOKEN: ${{ secrets.METRICS_TOKEN || github.token }}
+          GH_USER: ${{ github.repository_owner }}
+          STATS_SCOPE: ${{ secrets.METRICS_TOKEN && 'private' || 'public' }}
+        run: python3 scripts/stats.py assets/stats
+
+      # Committed next to the README so relative paths work whether the
+      # repository is public or private. Pushes made with GITHUB_TOKEN don't
+      # retrigger this workflow.
+      - name: Commit images
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/stats
+          if git diff --cached --quiet; then
+            echo "images unchanged"
+            exit 0
+          fi
+          git commit -m "chore: redraw profile stats"
+          git pull --rebase origin main
+          git push origin HEAD:main
